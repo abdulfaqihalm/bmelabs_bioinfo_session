@@ -1,0 +1,1 @@
+This folder contains small biological datasets. The actual dataset can be as large as hundred Gbs. The data was collected from https://github.com/roryk/tiny-test-data
