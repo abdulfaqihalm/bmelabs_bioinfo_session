@@ -1,0 +1,183 @@
+# A Simple Differential Gene Expression Analysis
+
+The script are adapted from <https://diytranscriptomics.com>.
+
+The dataset is an RNAseq dataset from skin biopsies obtained from patients with cutaneous leishmaniasis, a parasitic disease endemic in Brazil and other areas of South America. These datasets were obtained also from <https://diytranscriptomics.com>.
+
+We'll be working with data from 5 patients with this disease and 5 healthy endemic controls.
+
+## DGE Analysis objective!
+
+# Step 1: Prepare the count data
+
+```{r}
+library(DESeq2)
+library(tidyverse)
+library(tximport)
+library(ensembldb)
+library(EnsDb.Hsapiens.v86)
+
+library(EnhancedVolcano)
+```
+
+```{r}
+# Read the study design and pat
+studyDesign <- read_delim("data/studydesign.txt") # read in your study design
+path <- file.path("data", "kallisto", targets$sample, "abundance.tsv") # set file paths to your mapped data
+
+# Check if the path exist
+all(file.exists(path))
+
+# Check the study design
+studyDesign
+```
+
+```{r}
+# Prepare transcript to gene annotation using ensemble
+Tx <- transcripts(EnsDb.Hsapiens.v86, columns=c("tx_id", "gene_name"))
+Tx <- as_tibble(Tx)
+Tx <- dplyr::rename(Tx, target_id = tx_id)
+Tx <- dplyr::select(Tx, "target_id", "gene_name")
+
+# Load kallisto data
+Txi_gene <- tximport(
+  path, 
+  type = "kallisto", 
+  tx2gene = Tx, 
+  txOut = FALSE, #determines whether your data represented at transcript or gene level
+  countsFromAbundance = "no",
+  ignoreTxVersion = TRUE
+)
+
+# Make the counts dataframe
+counts <- Txi_gene$counts
+counts <- as.data.frame(counts, rownames = "geneID")
+sampleLabels <- studyDesign$sample
+colnames(counts) <- c(sampleLabels)
+```
+
+```{r}
+# Take a glance
+head(counts)
+dim(counts)
+```
+
+# Step 2: Data exploration
+
+## Preprocessing
+
+```{r}
+# Remove not expressend gene
+keep <- rowSums(counts) > 0
+counts <- counts[keep, ]
+
+# Add a small constant to avoid log(0)
+counts_log <- log10(counts + 1)
+```
+
+### Question!
+
+How many genes are filtered out?
+
+```{r}
+
+```
+
+# Step 3: Differential expression analysis using DESeq2
+
+```{r}
+# We use DESeqDataSetFromTximport because we use tximport to load the data
+dds <- DESeqDataSetFromTximport(txi = Txi_gene, 
+                                colData = studyDesign, 
+                                design = ~ group)
+```
+
+```{r}
+groupSize <- 5
+keep <- rowSums(counts(dds) >= 10) >= groupSize
+dds <- dds[keep, ]
+dds$group <- relevel(dds$group, ref = "healthy")
+
+dds
+```
+
+```{r}
+dds <- DESeq(dds)
+```
+
+```{r}
+res <- results(dds, alpha = 0.01)
+```
+
+```{r}
+res
+```
+
+```{r}
+summary(res)
+```
+
+# Step 4: Data Analysis
+
+```{r}
+vsd <- vst(dds, blind = FALSE)
+data <- assay(vsd)
+```
+
+## Volcano plot
+
+<https://bioconductor.org/packages/devel/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html>
+
+```{r}
+EnhancedVolcano(res,
+    lab = rownames(res),
+    x = 'log2FoldChange',
+    y = 'padj')
+```
+
+## Principal Component Analysis
+
+```{r}
+# Perform PCA
+pca_result <- prcomp(t(data))
+
+# Create a data frame with the PCA results
+pca_df <- as.data.frame(pca_result$x)
+rownames(pca_df) <- c(sampleLabels)
+group <- targets$group
+group <- factor(group)
+
+# Create the PCA plot
+ggplot(pca_df, aes(x = PC1, y = PC2, color = group)) +
+  geom_point() +
+  geom_text(aes(label = rownames(pca_df)), vjust = -0.5) +
+  theme_minimal() +
+  labs(title = "PCA of Gene Expression Samples",
+       x = "Principal Component 1",
+       y = "Principal Component 2")
+```
+
+```{r}
+distance <- dist(t(data), method = "euclidean") 
+# other distance methods are "euclidean", maximum", "manhattan", "canberra", "binary" or "minkowski"
+
+clusters <- hclust(distance, method = "average") 
+# other agglomeration methods are "ward.D", "ward.D2", "single", "complete", "average", "mcquitty", "median", or "centroid"
+
+plot(clusters, labels=sampleLabels)
+```
+
+## Top hits
+
+```{r}
+# Sort by adjusted p-value
+res_sorted <- res[order(res$padj),]
+
+# Filter for significant genes (e.g., adjusted p-value < 0.01)
+top_hits <- res_sorted[which(res_sorted$padj < 0.01),]
+
+# Filter for genes with a log2 fold change greater than a threshold
+top_hits <- top_hits[which(abs(top_hits$log2FoldChange) > 1),]
+
+top_hits
+```
