@@ -1,5 +1,16 @@
 # A Simple Differential Gene Expression Analysis
 
+# Package installations if needed 
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("DESeq2")
+install.packages("tidyverse")
+install.packages("tximport")
+BiocManager::install("EnsDb.Hsapiens.v86") # This package loads an SQL connection to a database containing annotations from Ensembl
+BiocManager::install('EnhancedVolcano') # highly-configurable publication-ready volcano plots.
+```
+
 The script are adapted from <https://diytranscriptomics.com>.
 
 The dataset is an RNAseq dataset from skin biopsies obtained from patients with cutaneous leishmaniasis, a parasitic disease endemic in Brazil and other areas of South America. These datasets were obtained also from <https://diytranscriptomics.com>.
@@ -8,22 +19,23 @@ We'll be working with data from 5 patients with this disease and 5 healthy endem
 
 ## DGE Analysis objective!
 
+
+
 # Step 1: Prepare the count data
 
 ```{r}
-library(DESeq2)
-library(tidyverse)
-library(tximport)
-library(ensembldb)
-library(EnsDb.Hsapiens.v86)
-
-library(EnhancedVolcano)
+library(DESeq2) # This package is used for differential gene expression analysis
+library(tidyverse) # For data wrangling
+library(tximport) # Transcript related things
+library(ensembldb) # database from ENSEMBL
+library(EnsDb.Hsapiens.v86) # This package loads an SQL connection to a database containing annotations from Ensembl
+library(EnhancedVolcano) # highly-configurable publication-ready volcano plots.
 ```
 
 ```{r}
 # Read the study design and pat
 studyDesign <- read_delim("data/studydesign.txt") # read in your study design
-path <- file.path("data", "kallisto", targets$sample, "abundance.tsv") # set file paths to your mapped data
+path <- file.path("data", "kallisto", studyDesign$sample, "abundance.tsv") # set file paths to your mapped data
 
 # Check if the path exist
 all(file.exists(path))
@@ -111,8 +123,13 @@ summary(res)
 ## More filtering
 
 ```{r}
+
+# Set this value in your favor
+ALPHA = 0.01
+LFCTHRESHOLD = 0.25
+
 # Get the result
-res <- results(dds, alpha=0.01)
+res <- results(dds, alpha=ALPHA, lfcThreshold = LFCTHRESHOLD)
 summary(res)
 ```
 
@@ -143,21 +160,23 @@ data <- assay(vsd)
 ```{r}
 # Perform PCA
 pca_result <- prcomp(t(data))
-
+pca_exp_var <- summary(pca_result)$importance["Proportion of Variance",]
 # Create a data frame with the PCA results
 pca_df <- as.data.frame(pca_result$x)
 rownames(pca_df) <- c(sampleLabels)
-group <- targets$group
+group <- studyDesign$group
 group <- factor(group)
+
+
 
 # Create the PCA plot
 ggplot(pca_df, aes(x = PC1, y = PC2, color = group)) +
   geom_point() +
-  geom_text(aes(label = rownames(pca_df)), vjust = -0.5) +
+  geom_text(aes(label = rownames(pca_df)), vjust = -0.5, show.legend = FALSE) +
   theme_minimal() +
   labs(title = "PCA of Gene Expression Samples",
-       x = "Principal Component 1",
-       y = "Principal Component 2")
+       x = paste0("Principal Component 1 (", pca_exp_var[1]*100, "%)"),
+       y = paste0("Principal Component 2 (", pca_exp_var[2]*100, "%)"))
 ```
 
 ## Hierarchical Clustering
@@ -194,16 +213,26 @@ head(top_hits, n = 20)
 ## MA plot
 
 ```{r}
-plotMA(resLFC, ylim=c(-2,2))
+ggplot(resLFC, mapping = aes(x = baseMean, y = log2FoldChange,
+                             color=padj < ALPHA)) +
+  geom_point(alpha=0.4) +
+  geom_hline(yintercept = 0, alpha = 0.75, color = "red") +
+  geom_hline(yintercept = -1) +
+  geom_hline(yintercept = 1) +
+  geom_smooth(colour = "blue") +
+  scale_x_log10() +
+  labs(title = "MA Plots") +
+  theme_bw()
 ```
+
 
 ## Volcano plot
 
 <https://bioconductor.org/packages/devel/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html>
 
 ```{r}
-EnhancedVolcano(res_shrunk,
-    lab = rownames(res_shrunk),
+EnhancedVolcano(resLFC,
+    lab = rownames(resLFC),
     x = 'log2FoldChange',
     y = 'padj')
 ```
