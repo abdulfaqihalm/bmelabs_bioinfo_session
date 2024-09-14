@@ -48,42 +48,24 @@ Txi_gene <- tximport(
   countsFromAbundance = "no",
   ignoreTxVersion = TRUE
 )
+```
 
-# Make the counts dataframe
+### Take a glance to our data
+
+```{r}
+# Make a counts dataframe from Txi_gene
 counts <- Txi_gene$counts
 counts <- as.data.frame(counts, rownames = "geneID")
 sampleLabels <- studyDesign$sample
 colnames(counts) <- c(sampleLabels)
-```
 
-```{r}
-# Take a glance
 head(counts)
 dim(counts)
 ```
 
-# Step 2: Data exploration
+# Step 2: Differential expression analysis using DESeq2
 
-## Preprocessing
-
-```{r}
-# Remove not expressend gene
-keep <- rowSums(counts) > 0
-counts <- counts[keep, ]
-
-# Add a small constant to avoid log(0)
-counts_log <- log10(counts + 1)
-```
-
-### Question!
-
-How many genes are filtered out?
-
-```{r}
-
-```
-
-# Step 3: Differential expression analysis using DESeq2
+## Add Txi to dds object
 
 ```{r}
 # We use DESeqDataSetFromTximport because we use tximport to load the data
@@ -91,6 +73,8 @@ dds <- DESeqDataSetFromTximport(txi = Txi_gene,
                                 colData = studyDesign, 
                                 design = ~ group)
 ```
+
+## Filter data
 
 ```{r}
 groupSize <- 5
@@ -101,20 +85,50 @@ dds$group <- relevel(dds$group, ref = "healthy")
 dds
 ```
 
+## Perform DESeq2
+
 ```{r}
 dds <- DESeq(dds)
 ```
 
 ```{r}
-res <- results(dds, alpha = 0.01)
+resultsNames(dds)
 ```
 
+## Get the result
+
 ```{r}
-res
+# Get the result
+res <- results(dds)
 ```
+
+## Explore the result
 
 ```{r}
 summary(res)
+```
+
+## More filtering
+
+```{r}
+# Get the result
+res <- results(dds, alpha=0.01)
+summary(res)
+```
+
+## Log fold shrinkage
+
+```{r}
+# Log fold change shrinkage for visualization and ranking
+resLFC <- lfcShrink(dds, coef=2, res=res) 
+```
+
+```{r}
+resLFC
+```
+
+```{r}
+summary(resLFC)
 ```
 
 # Step 4: Data Analysis
@@ -122,17 +136,6 @@ summary(res)
 ```{r}
 vsd <- vst(dds, blind = FALSE)
 data <- assay(vsd)
-```
-
-## Volcano plot
-
-<https://bioconductor.org/packages/devel/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html>
-
-```{r}
-EnhancedVolcano(res,
-    lab = rownames(res),
-    x = 'log2FoldChange',
-    y = 'padj')
 ```
 
 ## Principal Component Analysis
@@ -157,6 +160,8 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = group)) +
        y = "Principal Component 2")
 ```
 
+## Hierarchical Clustering
+
 ```{r}
 distance <- dist(t(data), method = "euclidean") 
 # other distance methods are "euclidean", maximum", "manhattan", "canberra", "binary" or "minkowski"
@@ -171,13 +176,38 @@ plot(clusters, labels=sampleLabels)
 
 ```{r}
 # Sort by adjusted p-value
-res_sorted <- res[order(res$padj),]
+res_sorted <- resLFC[order(resLFC$padj),]
 
-# Filter for significant genes (e.g., adjusted p-value < 0.01)
-top_hits <- res_sorted[which(res_sorted$padj < 0.01),]
+# Filter for significant genes
+top_hits <- res_sorted[which(res_sorted$padj < 0.05),]
 
-# Filter for genes with a log2 fold change greater than a threshold
-top_hits <- top_hits[which(abs(top_hits$log2FoldChange) > 1),]
+# Add a column for absolute log2FoldChange
+top_hits$absLFC <- abs(top_hits$log2FoldChange)
 
-top_hits
+# Sort by a combination of significance and effect size
+top_hits <- top_hits[order(top_hits$padj * (1 / top_hits$absLFC)),]
+
+# Display top genes
+head(top_hits, n = 20)
+```
+
+## MA plot
+
+```{r}
+plotMA(resLFC, ylim=c(-2,2))
+```
+
+## Volcano plot
+
+<https://bioconductor.org/packages/devel/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html>
+
+```{r}
+EnhancedVolcano(res_shrunk,
+    lab = rownames(res_shrunk),
+    x = 'log2FoldChange',
+    y = 'padj')
+```
+
+```{r}
+plotCounts(dds, gene=which.min(resLFC$padj), intgroup="group")
 ```
