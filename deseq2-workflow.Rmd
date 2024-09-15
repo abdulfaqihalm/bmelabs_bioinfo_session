@@ -1,5 +1,16 @@
 # A Simple Differential Gene Expression Analysis
 
+# Package installations if needed 
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("DESeq2")
+install.packages("tidyverse")
+install.packages("tximport")
+BiocManager::install("EnsDb.Hsapiens.v86") # This package loads an SQL connection to a database containing annotations from Ensembl
+BiocManager::install('EnhancedVolcano') # highly-configurable publication-ready volcano plots.
+```
+
 The script are adapted from <https://diytranscriptomics.com>.
 
 The dataset is an RNAseq dataset from skin biopsies obtained from patients with cutaneous leishmaniasis, a parasitic disease endemic in Brazil and other areas of South America. These datasets were obtained also from <https://diytranscriptomics.com>.
@@ -46,17 +57,17 @@ BiocManager::install("org.Hs.eg.db")
 ```
 
 ```{r}
-library(DESeq2)
-library(tidyverse)
-library(tximport)
-library(ensembldb)
-library(EnsDb.Hsapiens.v86)
+library(DESeq2) # This package is used for differential gene expression analysis
+library(tidyverse) # For data wrangling
+library(tximport) # Transcript related things
+library(ensembldb) # database from ENSEMBL
+library(EnsDb.Hsapiens.v86) # This package loads an SQL connection to a database containing annotations from Ensembl
 
-library(EnhancedVolcano)
+library(EnhancedVolcano) # highly-configurable publication-ready volcano plots.
 
-library(clusterProfiler)
-library(AnnotationDbi)
-library(org.Hs.eg.db)
+library(clusterProfiler) # package to perform gene clustering and profiling
+library(AnnotationDbi) # annotation package for clusterProfiler
+library(org.Hs.eg.db) # Homo sapiens annotation database also for clusterProfiler
 ```
 
 ## Load study design matrix
@@ -175,7 +186,9 @@ ALPHA = 0.01
 LFCTHRESHOLD = 0.25
 
 # Get the result
+
 res <- results(dds, alpha=ALPHA, lfcThreshold=LFCTHRESHOLD)
+
 summary(res)
 ```
 
@@ -214,6 +227,8 @@ pca_df <- as.data.frame(pca_result$x)
 rownames(pca_df) <- c(sampleLabels)
 group <- studyDesign$group
 group <- factor(group)
+
+
 
 # Create the PCA plot
 ggplot(pca_df, aes(x = PC1, y = PC2, color = group)) +
@@ -274,6 +289,7 @@ ggplot(resLFC, mapping = aes(x = baseMean, y = log2FoldChange,
   labs(title = "MA Plots") +
   theme_bw()
 ```
+
 
 ## Volcano plot
 
