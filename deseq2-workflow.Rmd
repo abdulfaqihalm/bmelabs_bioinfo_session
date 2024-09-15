@@ -8,7 +8,42 @@ We'll be working with data from 5 patients with this disease and 5 healthy endem
 
 ## DGE Analysis objective!
 
+1.  Detect differentially expressed genes
+2.  Quantify expression changes
+
 # Step 1: Prepare the count data
+
+For the sake of simplicity of the hands-on, the raw data is already mapped to transcriptome reference using a mapper called `kallisto`.
+
+## Load library
+
+```{r}
+# Uncomment and run the command below to enable all repository, to install some packages you missed
+
+# setRepositories()
+
+# Then install the package you need using:
+
+# install.packages("packageName")
+
+# or
+
+# BiocManager::install("packageName")
+```
+
+```{r}
+# Package installations if needed 
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("DESeq2")
+install.packages("tidyverse")
+install.packages("tximport")
+BiocManager::install("EnsDb.Hsapiens.v86") # This package loads an SQL connection to a database containing annotations from Ensembl
+BiocManager::install('EnhancedVolcano') # highly-configurable publication-ready volcano plots.
+BiocManager::install("clusterProfiler")
+BiocManager::install("AnnotationDbi")
+BiocManager::install("org.Hs.eg.db")
+```
 
 ```{r}
 library(DESeq2)
@@ -18,12 +53,18 @@ library(ensembldb)
 library(EnsDb.Hsapiens.v86)
 
 library(EnhancedVolcano)
+
+library(clusterProfiler)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
 ```
+
+## Load study design matrix
 
 ```{r}
 # Read the study design and pat
 studyDesign <- read_delim("data/studydesign.txt") # read in your study design
-path <- file.path("data", "kallisto", targets$sample, "abundance.tsv") # set file paths to your mapped data
+path <- file.path("data", "kallisto", studyDesign$sample, "abundance.tsv") # set file paths to your mapped data
 
 # Check if the path exist
 all(file.exists(path))
@@ -31,6 +72,10 @@ all(file.exists(path))
 # Check the study design
 studyDesign
 ```
+
+## Load data from kallisto
+
+We are using a package called `tximport`.
 
 ```{r}
 # Prepare transcript to gene annotation using ensemble
@@ -45,12 +90,15 @@ Txi_gene <- tximport(
   type = "kallisto", 
   tx2gene = Tx, 
   txOut = FALSE, #determines whether your data represented at transcript or gene level
-  countsFromAbundance = "no",
   ignoreTxVersion = TRUE
 )
 ```
 
-### Take a glance to our data
+### Question: How many transcripts we have in our data?
+
+## Take a glance to our data
+
+We are not going to use it though. Just to see what is inside :)
 
 ```{r}
 # Make a counts dataframe from Txi_gene
@@ -60,8 +108,9 @@ sampleLabels <- studyDesign$sample
 colnames(counts) <- c(sampleLabels)
 
 head(counts)
-dim(counts)
 ```
+
+### Question: How many genes we have?
 
 # Step 2: Differential expression analysis using DESeq2
 
@@ -76,6 +125,8 @@ dds <- DESeqDataSetFromTximport(txi = Txi_gene,
 
 ## Filter data
 
+Filter lowly expressed genes.
+
 ```{r}
 groupSize <- 5
 keep <- rowSums(counts(dds) >= 10) >= groupSize
@@ -85,14 +136,12 @@ dds$group <- relevel(dds$group, ref = "healthy")
 dds
 ```
 
+### Question: How many genes are filtered?
+
 ## Perform DESeq2
 
 ```{r}
 dds <- DESeq(dds)
-```
-
-```{r}
-resultsNames(dds)
 ```
 
 ## Get the result
@@ -105,21 +154,35 @@ res <- results(dds)
 ## Explore the result
 
 ```{r}
+res
+```
+
+```{r}
 summary(res)
 ```
 
-## More filtering
+## More strict filtering
+
+We will redo getting the results by changing the alpha, to make the statistical test more stringent.
+
+Reducing number of false positives, but it might also increase false negative. <https://en.wikipedia.org/wiki/False_discovery_rate>
+
+### Question: Why is that?
 
 ```{r}
+# Set this value in your favor
+ALPHA = 0.01
+LFCTHRESHOLD = 0.25
+
 # Get the result
-res <- results(dds, alpha=0.01)
+res <- results(dds, alpha=ALPHA, lfcThreshold=LFCTHRESHOLD)
 summary(res)
 ```
 
 ## Log fold shrinkage
 
 ```{r}
-# Log fold change shrinkage for visualization and ranking
+# Log fold change shrinkage for stricter analysis
 resLFC <- lfcShrink(dds, coef=2, res=res) 
 ```
 
@@ -131,7 +194,7 @@ resLFC
 summary(resLFC)
 ```
 
-# Step 4: Data Analysis
+# Step 3: Typical Data Analysis
 
 ```{r}
 vsd <- vst(dds, blind = FALSE)
@@ -140,27 +203,31 @@ data <- assay(vsd)
 
 ## Principal Component Analysis
 
+<https://en.wikipedia.org/wiki/Principal_component_analysis>
+
 ```{r}
 # Perform PCA
 pca_result <- prcomp(t(data))
-
+pca_exp_var <- summary(pca_result)$importance["Proportion of Variance",]
 # Create a data frame with the PCA results
 pca_df <- as.data.frame(pca_result$x)
 rownames(pca_df) <- c(sampleLabels)
-group <- targets$group
+group <- studyDesign$group
 group <- factor(group)
 
 # Create the PCA plot
 ggplot(pca_df, aes(x = PC1, y = PC2, color = group)) +
   geom_point() +
-  geom_text(aes(label = rownames(pca_df)), vjust = -0.5) +
+  geom_text(aes(label = rownames(pca_df)), vjust = -0.5, show.legend = FALSE) +
   theme_minimal() +
   labs(title = "PCA of Gene Expression Samples",
-       x = "Principal Component 1",
-       y = "Principal Component 2")
+       x = paste0("Principal Component 1 (", pca_exp_var[1]*100, "%)"),
+       y = paste0("Principal Component 2 (", pca_exp_var[2]*100, "%)"))
 ```
 
 ## Hierarchical Clustering
+
+<https://en.wikipedia.org/wiki/Hierarchical_clustering>
 
 ```{r}
 distance <- dist(t(data), method = "euclidean") 
@@ -179,7 +246,7 @@ plot(clusters, labels=sampleLabels)
 res_sorted <- resLFC[order(resLFC$padj),]
 
 # Filter for significant genes
-top_hits <- res_sorted[which(res_sorted$padj < 0.05),]
+top_hits <- res_sorted[which(res_sorted$padj < 0.05 & res_sorted$baseMean > 50),]
 
 # Add a column for absolute log2FoldChange
 top_hits$absLFC <- abs(top_hits$log2FoldChange)
@@ -193,8 +260,19 @@ head(top_hits, n = 20)
 
 ## MA plot
 
+<https://en.wikipedia.org/wiki/MA_plot>
+
 ```{r}
-plotMA(resLFC, ylim=c(-2,2))
+ggplot(resLFC, mapping = aes(x = baseMean, y = log2FoldChange,
+                             color=padj < ALPHA)) +
+  geom_point(alpha=0.4) +
+  geom_hline(yintercept = 0, alpha = 0.75, color = "red") +
+  geom_hline(yintercept = -1) +
+  geom_hline(yintercept = 1) +
+  geom_smooth(colour = "blue") +
+  scale_x_log10() +
+  labs(title = "MA Plots") +
+  theme_bw()
 ```
 
 ## Volcano plot
@@ -202,12 +280,43 @@ plotMA(resLFC, ylim=c(-2,2))
 <https://bioconductor.org/packages/devel/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html>
 
 ```{r}
-EnhancedVolcano(res_shrunk,
-    lab = rownames(res_shrunk),
+EnhancedVolcano(top_hits,
+    lab = rownames(top_hits),
     x = 'log2FoldChange',
     y = 'padj')
 ```
 
+## Plot counts
+
 ```{r}
 plotCounts(dds, gene=which.min(resLFC$padj), intgroup="group")
 ```
+
+# Step 4: Further Analysis
+
+## Gene Ontology Analysis
+
+```{r}
+top_genes <- rownames(top_hits[abs(top_hits$log2FoldChange) > 0.5,])
+```
+
+```{r}
+GO_results <- enrichGO(
+  gene = top_genes, 
+  OrgDb = "org.Hs.eg.db", 
+  keyType = "SYMBOL", 
+  ont = "BP"
+)
+
+# choose between "MF" (molecular function), "BP" (biological process), and "CC" (cell junction)
+```
+
+```{r}
+as.data.frame(GO_results)
+```
+
+```{r}
+plot(barplot(GO_results, showCategory = 20, order = TRUE))
+```
+
+# End!
