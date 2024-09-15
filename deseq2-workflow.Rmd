@@ -19,9 +19,42 @@ We'll be working with data from 5 patients with this disease and 5 healthy endem
 
 ## DGE Analysis objective!
 
-
+1.  Detect differentially expressed genes
+2.  Quantify expression changes
 
 # Step 1: Prepare the count data
+
+For the sake of simplicity of the hands-on, the raw data is already mapped to transcriptome reference using a mapper called `kallisto`.
+
+## Load library
+
+```{r}
+# Uncomment and run the command below to enable all repository, to install some packages you missed
+
+# setRepositories()
+
+# Then install the package you need using:
+
+# install.packages("packageName")
+
+# or
+
+# BiocManager::install("packageName")
+```
+
+```{r}
+# Package installations if needed 
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("DESeq2")
+install.packages("tidyverse")
+install.packages("tximport")
+BiocManager::install("EnsDb.Hsapiens.v86") # This package loads an SQL connection to a database containing annotations from Ensembl
+BiocManager::install('EnhancedVolcano') # highly-configurable publication-ready volcano plots.
+BiocManager::install("clusterProfiler")
+BiocManager::install("AnnotationDbi")
+BiocManager::install("org.Hs.eg.db")
+```
 
 ```{r}
 library(DESeq2) # This package is used for differential gene expression analysis
@@ -29,8 +62,15 @@ library(tidyverse) # For data wrangling
 library(tximport) # Transcript related things
 library(ensembldb) # database from ENSEMBL
 library(EnsDb.Hsapiens.v86) # This package loads an SQL connection to a database containing annotations from Ensembl
+
 library(EnhancedVolcano) # highly-configurable publication-ready volcano plots.
+
+library(clusterProfiler) # package to perform gene clustering and profiling
+library(AnnotationDbi) # annotation package for clusterProfiler
+library(org.Hs.eg.db) # Homo sapiens annotation database also for clusterProfiler
 ```
+
+## Load study design matrix
 
 ```{r}
 # Read the study design and pat
@@ -43,6 +83,10 @@ all(file.exists(path))
 # Check the study design
 studyDesign
 ```
+
+## Load data from kallisto
+
+We are using a package called `tximport`.
 
 ```{r}
 # Prepare transcript to gene annotation using ensemble
@@ -57,12 +101,15 @@ Txi_gene <- tximport(
   type = "kallisto", 
   tx2gene = Tx, 
   txOut = FALSE, #determines whether your data represented at transcript or gene level
-  countsFromAbundance = "no",
   ignoreTxVersion = TRUE
 )
 ```
 
-### Take a glance to our data
+### Question: How many transcripts we have in our data?
+
+## Take a glance to our data
+
+We are not going to use it though. Just to see what is inside :)
 
 ```{r}
 # Make a counts dataframe from Txi_gene
@@ -72,8 +119,9 @@ sampleLabels <- studyDesign$sample
 colnames(counts) <- c(sampleLabels)
 
 head(counts)
-dim(counts)
 ```
+
+### Question: How many genes we have?
 
 # Step 2: Differential expression analysis using DESeq2
 
@@ -88,6 +136,8 @@ dds <- DESeqDataSetFromTximport(txi = Txi_gene,
 
 ## Filter data
 
+Filter lowly expressed genes.
+
 ```{r}
 groupSize <- 5
 keep <- rowSums(counts(dds) >= 10) >= groupSize
@@ -97,14 +147,12 @@ dds$group <- relevel(dds$group, ref = "healthy")
 dds
 ```
 
+### Question: How many genes are filtered?
+
 ## Perform DESeq2
 
 ```{r}
 dds <- DESeq(dds)
-```
-
-```{r}
-resultsNames(dds)
 ```
 
 ## Get the result
@@ -117,26 +165,37 @@ res <- results(dds)
 ## Explore the result
 
 ```{r}
+res
+```
+
+```{r}
 summary(res)
 ```
 
-## More filtering
+## More strict filtering
+
+We will redo getting the results by changing the alpha, to make the statistical test more stringent.
+
+Reducing number of false positives, but it might also increase false negative. <https://en.wikipedia.org/wiki/False_discovery_rate>
+
+### Question: Why is that?
 
 ```{r}
-
 # Set this value in your favor
 ALPHA = 0.01
 LFCTHRESHOLD = 0.25
 
 # Get the result
-res <- results(dds, alpha=ALPHA, lfcThreshold = LFCTHRESHOLD)
+
+res <- results(dds, alpha=ALPHA, lfcThreshold=LFCTHRESHOLD)
+
 summary(res)
 ```
 
 ## Log fold shrinkage
 
 ```{r}
-# Log fold change shrinkage for visualization and ranking
+# Log fold change shrinkage for stricter analysis
 resLFC <- lfcShrink(dds, coef=2, res=res) 
 ```
 
@@ -148,7 +207,7 @@ resLFC
 summary(resLFC)
 ```
 
-# Step 4: Data Analysis
+# Step 3: Typical Data Analysis
 
 ```{r}
 vsd <- vst(dds, blind = FALSE)
@@ -156,6 +215,8 @@ data <- assay(vsd)
 ```
 
 ## Principal Component Analysis
+
+<https://en.wikipedia.org/wiki/Principal_component_analysis>
 
 ```{r}
 # Perform PCA
@@ -181,6 +242,8 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = group)) +
 
 ## Hierarchical Clustering
 
+<https://en.wikipedia.org/wiki/Hierarchical_clustering>
+
 ```{r}
 distance <- dist(t(data), method = "euclidean") 
 # other distance methods are "euclidean", maximum", "manhattan", "canberra", "binary" or "minkowski"
@@ -198,7 +261,7 @@ plot(clusters, labels=sampleLabels)
 res_sorted <- resLFC[order(resLFC$padj),]
 
 # Filter for significant genes
-top_hits <- res_sorted[which(res_sorted$padj < 0.05),]
+top_hits <- res_sorted[which(res_sorted$padj < 0.05 & res_sorted$baseMean > 50),]
 
 # Add a column for absolute log2FoldChange
 top_hits$absLFC <- abs(top_hits$log2FoldChange)
@@ -211,6 +274,8 @@ head(top_hits, n = 20)
 ```
 
 ## MA plot
+
+<https://en.wikipedia.org/wiki/MA_plot>
 
 ```{r}
 ggplot(resLFC, mapping = aes(x = baseMean, y = log2FoldChange,
@@ -231,12 +296,43 @@ ggplot(resLFC, mapping = aes(x = baseMean, y = log2FoldChange,
 <https://bioconductor.org/packages/devel/bioc/vignettes/EnhancedVolcano/inst/doc/EnhancedVolcano.html>
 
 ```{r}
-EnhancedVolcano(resLFC,
-    lab = rownames(resLFC),
+EnhancedVolcano(top_hits,
+    lab = rownames(top_hits),
     x = 'log2FoldChange',
     y = 'padj')
 ```
 
+## Plot counts
+
 ```{r}
 plotCounts(dds, gene=which.min(resLFC$padj), intgroup="group")
 ```
+
+# Step 4: Further Analysis
+
+## Gene Ontology Analysis
+
+```{r}
+top_genes <- rownames(top_hits[abs(top_hits$log2FoldChange) > 0.5,])
+```
+
+```{r}
+GO_results <- enrichGO(
+  gene = top_genes, 
+  OrgDb = "org.Hs.eg.db", 
+  keyType = "SYMBOL", 
+  ont = "BP"
+)
+
+# choose between "MF" (molecular function), "BP" (biological process), and "CC" (cell junction)
+```
+
+```{r}
+as.data.frame(GO_results)
+```
+
+```{r}
+plot(barplot(GO_results, showCategory = 20, order = TRUE))
+```
+
+# End!
